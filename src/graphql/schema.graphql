@@ -1,0 +1,274 @@
+"""
+Rate-limiting directive for controlling how many times a field or object 
+can be accessed within a specific time window.
+"""
+directive @rateLimit(
+  "The maximum number of requests allowed within the window."
+  max: Int
+
+  "The time window for rate limiting (e.g., '60s', '1h')."
+  window: String
+
+  "Custom error message returned when the rate limit is exceeded."
+  message: String
+) on FIELD_DEFINITION | OBJECT
+
+"""
+Custom scalar representing arbitrary JSON values.
+"""
+scalar JSON
+
+# ------------------------------------------------------------
+# TYPE DEFINITIONS
+# ------------------------------------------------------------
+
+
+"""
+Represents a single key-value pair within a record's data.
+"""
+type RecordValue {
+  "The field's name (not its ID). Easier for the client."
+  field: String!
+  "The actual stored value for the field."
+  value: JSON
+}
+
+"""
+Represents a single record (row) in a database.
+"""
+type Record {
+  "Unique identifier for the record."
+  _id: ID!
+
+  "The ID of the database this record belongs to."
+  databaseId: ID!
+
+  "The ID of the tenant this record belongs to."
+  tenantId: ID!
+
+  "An array of key-value pairs containing the record's data."
+  values: [RecordValue!]
+
+  "Timestamp of when the record was created."
+  createdAt: String!
+
+  "Timestamp of the last update to the record."
+  updatedAt: String!
+}
+
+"""
+Represents a single field (column) in a database schema.
+"""
+type Field {
+  "Unique identifier for the field."
+  _id: ID!
+
+  "The human-readable name of the field."
+  name: String!
+
+  "The data type of the field (e.g., 'String', 'Number')."
+  type: String!
+
+  "Optional list of allowed values (for dropdowns, enums, etc.)."
+  options: [String]
+
+  "If this field is a relation, the ID of the related database."
+  relation: ID
+}
+
+"""
+Represents a database belonging to a tenant.
+"""
+type Database {
+  "Unique identifier for the database."
+  _id: ID!
+
+  "The human-readable name of the database."
+  name: String!
+
+  "The ID of the tenant that owns this database."
+  tenantId: ID!
+
+  "The schema fields for this database."
+  fields: [Field!]
+}
+
+"""
+Represents user data safe to send to the client.
+"""
+type User {
+  "Unique identifier for the user."
+  _id: ID!
+
+  "The user's chosen username."
+  username: String!
+
+  "The user's email address."
+  email: String!
+
+  "The user's role (e.g., 'Admin', 'Editor')."
+  role: String!
+
+  "The ID of the tenant the user belongs to."
+  tenantId: ID!
+}
+
+"""
+Represents an authentication payload returned after login or signup.
+"""
+type AuthPayload {
+  "JWT token for authenticating subsequent requests."
+  token: String!
+
+  "The authenticated user's details."
+  user: User!
+}
+
+"""
+Represents an activity log entry for auditing purposes.
+"""
+type ActivityLog {
+  "Unique identifier for the log entry."
+  _id: ID!
+
+  "The ID of the user who performed the action."
+  userId: ID!
+
+  "A short description of the action performed."
+  action: String!
+
+  "Additional details about the action (in JSON format)."
+  details: JSON
+
+  "Timestamp of when the action was performed."
+  createdAt: String!
+}
+
+# ------------------------------------------------------------
+# INPUT TYPES
+# ------------------------------------------------------------
+
+"""
+Input type for defining or updating a database field.
+"""
+input FieldInput {
+  "The human-readable name of the field."
+  name: String!
+
+  "The data type of the field (e.g., 'String', 'Number')."
+  type: String!
+
+  "Optional list of allowed values."
+  options: [String]
+
+  "If this field is a relation, the ID of the related database."
+  relation: ID
+}
+
+"""
+Input type for specifying sorting preferences.
+"""
+input SortInput {
+  "The name of the field to sort by."
+  field: String!
+
+  "The sort order: 'ASC' for ascending, 'DESC' for descending."
+  order: String!
+}
+
+
+
+# ------------------------------------------------------------
+# QUERY TYPE
+# ------------------------------------------------------------
+
+"""
+Root query type for fetching data.
+"""
+type Query @rateLimit(max: 200, window: "60s") {
+  "Simple test query to verify GraphQL server connectivity."
+  hello: String
+
+  "Fetch all databases belonging to the current user's tenant."
+  databases: [Database!]!
+
+  "Fetch a single database by its ID, ensuring tenant ownership."
+  database(id: ID!): Database
+
+  "Fetch records for a database, with filtering, sorting, pagination, and search."
+  records(
+    "The ID of the database to query."
+    databaseId: ID!
+
+    "Optional JSON filter object."
+    filter: JSON
+
+    "Optional sorting preferences."
+    sort: SortInput
+
+    "Page number for pagination (starting from 1)."
+    page: Int
+
+    "Number of results per page."
+    limit: Int
+
+    "Search term to match against record values."
+    search: String
+  ): [Record!]
+
+  "Fetch a single record by its ID."
+  record(id: ID!): Record
+
+  "Fetch the activity log for the tenant, with pagination."
+  activityLogs(
+    "Number of results per page."
+    limit: Int
+
+    "Page number for pagination."
+    page: Int
+  ): [ActivityLog!]
+}
+
+
+
+# ------------------------------------------------------------
+# MUTATION TYPE
+# ------------------------------------------------------------
+
+"""
+Root mutation type for creating, updating, and deleting data.
+"""
+type Mutation @rateLimit(max: 50, window: "60s") {
+  "Registers a new user and creates a tenant for them."
+  signup(username: String!, email: String!, password: String!): AuthPayload!
+
+  "Logs in an existing user and returns an authentication token."
+  login(email: String!, password: String!): AuthPayload!
+
+  "Creates a new database within the current user's tenant (Admin only)."
+  createDatabase(name: String!): Database!
+
+  "Updates the name of an existing database (Admin only)."
+  updateDatabase(id: ID!, name: String!): Database!
+
+  "Soft-deletes a database (Admin only)."
+  deleteDatabase(id: ID!): Boolean
+
+  "Adds a new field (column) to a database (Admin only)."
+  createField(databaseId: ID!, field: FieldInput!): Database!
+
+  "Updates an existing field (column) in a database (Admin only)."
+  updateField(databaseId: ID!, fieldId: ID!, field: FieldInput!): Database!
+
+  "Deletes a field (column) from a database (Admin only)."
+  deleteField(databaseId: ID!, fieldId: ID!): Database!
+
+  "Creates a new record (row) in a database (Editor/Admin only)."
+  createRecord(databaseId: ID!, values: JSON!): Record!
+
+  "Updates an existing record (Editor/Admin only)."
+  updateRecord(id: ID!, values: JSON!): Record!
+
+  "Soft-deletes a record (Editor/Admin only)."
+  deleteRecord(id: ID!): Boolean
+}
